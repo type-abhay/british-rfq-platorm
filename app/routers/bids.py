@@ -1,10 +1,5 @@
 """
-Bid submission route.
-
-The 409 (not 400) on BiddingNotOpenError is deliberate: 400 means
-"your request is malformed"; 409 means "your request is well-formed
-but conflicts with the current state of the resource" — which is
-exactly what "you tried to bid after the auction closed" is.
+Bid submission and deletion routes.
 """
 from __future__ import annotations
 
@@ -13,13 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.repositories import rfq_repository as repo
-from app.repositories.rfq_repository import BiddingNotOpenError, RfqNotFoundError
+from app.repositories.rfq_repository import BidNotFoundError, BiddingNotOpenError, RfqNotFoundError
 from app.schemas import BidCreate, BidOut
 
 router = APIRouter(prefix="/rfqs/{rfq_id}/bids", tags=["bids"])
 
 
-@router.post("", response_model=BidOut, status_code=201)
+@router.post("", response_model=BidOut, status_code=status.HTTP_201_CREATED)
 def submit_bid(rfq_id: str, payload: BidCreate, db: Session = Depends(get_db)):
     try:
         bid = repo.submit_bid(db, rfq_id, payload)
@@ -30,7 +25,13 @@ def submit_bid(rfq_id: str, payload: BidCreate, db: Session = Depends(get_db)):
 
     return BidOut.model_validate(bid)
 
-@router.delete("/{bid_id}", status_code=status.HTTP_204_NO_CONTENT)
+
+@router.delete("/{bid_id}", status_code=status.HTTP_200_OK)
 def delete_bid(rfq_id: str, bid_id: str, db: Session = Depends(get_db)):
-    repo.delete_bid(db, rfq_id=rfq_id, bid_id=bid_id)
-    return None
+    try:
+        repo.delete_bid(db, rfq_id=rfq_id, bid_id=bid_id)
+    except RfqNotFoundError:
+        raise HTTPException(status_code=404, detail="RFQ not found")
+    except BidNotFoundError:
+        raise HTTPException(status_code=404, detail="Bid not found for this RFQ")
+    return {"message": "Bid deleted successfully", "id": bid_id}
